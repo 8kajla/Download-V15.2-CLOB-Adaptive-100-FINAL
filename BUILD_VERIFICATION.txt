@@ -1,0 +1,21 @@
+V15.2 CLOB-ADAPTIVE $100 BUILD VERIFICATION
+
+Strategy integrity
+- strategy.py SHA256: 6121c88b006afa97c4636b87a97c00ee6f82b2aa266afdd462d5a33d2d1c2003
+- trader_behavior.json SHA256: 576deebee751f24a363289ef142aad327d26264bbb4b7f28d76aeb42b487c685
+- Both verified byte-identical to the exact V15.2 reference files.
+
+Tests
+- pytest run 1: 78 passed
+- pytest run 2: 78 passed
+- pytest run 3: 78 passed
+- python -m compileall -q .: PASS
+- shadow-mode startup import: PASS
+
+Safety / execution design
+- Default package mode is SHADOW in railway.env.example.
+- LIVE credentials are not included.
+- Adaptive execution keeps the V15.2 signal price as the baseline and only crosses the live CLOB within regime-specific bounds.
+- Exchange minimum-size uplift is bounded by regime and the $5 max-single-order cap.
+- Queue grouping requires exact condition/token/side/price compatibility.
+- Strategy code and trader_behavior.json are not modified by the adaptive execution layer.
