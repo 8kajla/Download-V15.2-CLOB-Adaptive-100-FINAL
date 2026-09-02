@@ -85,3 +85,15 @@ def test_shadow_refuses_non_passive_order(tmp_path):
     s.session = fake
     with pytest.raises(ValueError, match="marketable"):
         s.post_only_buy("t1", 0.80, 4.0, "c1")
+
+def test_shadow_mode_cannot_construct_live_client(monkeypatch):
+    """Regression: stale Railway LIVE_TRADING=true must not import LiveCLOB in shadow mode."""
+    import os
+    env = dict(os.environ)
+    env.update({"PAPER_TRADING":"false", "LIVE_TRADING":"true", "SHADOW_CLOB":"true", "DATA_DIR":"/tmp/v152-shadow-test"})
+    # bot.py may then attempt network/loop work; instead inspect its startup source
+    src = Path(__file__).resolve().parents[1] / 'bot.py'
+    text = src.read_text()
+    assert 'if SHADOW and LIVE:' in text
+    assert 'LIVE = False' in text
+    assert 'if LIVE:\n    from live_clob import LiveCLOB' in text
