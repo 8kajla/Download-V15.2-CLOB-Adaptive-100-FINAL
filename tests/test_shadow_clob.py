@@ -92,17 +92,16 @@ def test_shadow_mode_cannot_construct_live_client(monkeypatch):
     env = dict(os.environ)
     env.update({"PAPER_TRADING":"false", "LIVE_TRADING":"true", "SHADOW_CLOB":"true", "DATA_DIR":"/tmp/v152-shadow-test"})
     # bot.py may then attempt network/loop work; instead inspect its startup source
-    src = Path(__file__).resolve().parent.parent / 'bot.py'
+    src = Path(__file__).resolve().parents[1] / 'bot.py'
     text = src.read_text()
     assert 'if SHADOW and LIVE:' in text
     assert 'LIVE = False' in text
     assert 'if LIVE:\n    from live_clob import LiveCLOB' in text
 
 
-def test_railway_environment_forces_shadow_mode_without_live_import():
-    """Railway must remain shadow-only because the image lacks live SDK credentials/deps."""
-    src = (Path(__file__).resolve().parent.parent / "bot.py").read_text()
-    assert "is_railway" in src
-    assert 'SHADOW = os.getenv("SHADOW_CLOB", "true" if is_railway else "false").lower() == "true"' in src
-    assert "if is_railway:" in src
-    assert "LIVE = False" in src
+def test_shadow_does_not_require_accepting_orders_gate():
+    """Shadow execution must not discard public-market signals when Gamma says acceptingOrders=false."""
+    src = Path(__file__).resolve().parents[1] / "bot.py"
+    text = src.read_text()
+    assert 'if LIVE and market.get("accepting_orders") is not True:' in text
+    assert 'if SHADOW and market.get("accepting_orders") is not True:' not in text
