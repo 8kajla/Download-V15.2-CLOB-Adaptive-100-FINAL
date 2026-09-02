@@ -136,18 +136,24 @@ class ShadowCLOB:
         ask_size = sum(float(x.get("size", 0.0)) for x in (d.get("asks") or [])
                        if isinstance(x, dict) and abs(float(x.get("price", 0.0)) - float(ask or -1)) < 1e-9)
         min_shares = float(d.get("min_order_size") or 0.0)
-        if ask is None or float(ask) > limit + 1e-9:
+        if ask is None:
+            raise ValueError("shadow adaptive order has no current ask")
+        if float(ask) > limit + 1e-9:
             raise ValueError("shadow adaptive order has no acceptable ask")
         if requested + 1e-9 < min_shares:
             raise ValueError("shadow adaptive order below market minimum")
+        if ask_size <= 1e-9:
+            raise ValueError("shadow adaptive order has no displayed ask liquidity")
         fill_shares = min(requested, max(0.0, ask_size))
         oid = f"shadow-fak-{int(time.time()*1000)}-{uuid.uuid4().hex[:10]}"
         self.orders[oid] = {
             "id": oid, "condition": str(condition), "token": str(token_id),
             "side": "BUY", "price": float(ask), "limit_price": limit,
             "notional": float(fill_shares * float(ask)),
-            "shares": requested, "remaining_shares": max(0.0, requested - fill_shares),
-            "status": "FILLED" if fill_shares + 1e-9 >= requested else "PARTIAL",
+            "shares": requested, "filled_shares": fill_shares, "remaining_shares": 0.0,
+            # FAK semantics: any unfilled remainder is canceled, never left resting.
+            "status": "FILLED" if fill_shares + 1e-9 >= requested else ("PARTIAL_FILLED" if fill_shares > 1e-9 else "CANCELED"),
+            "unfilled_shares": max(0.0, requested - fill_shares),
             "created_at": time.time(), "last_seen": time.time(),
             "min_order_cost": float(ask) * min_shares, "min_shares": min_shares,
             "adaptive": True,
@@ -226,31 +232,23 @@ class ShadowCLOB:
         now = time.time()
         for oid, order in list(self.orders.items()):
             if order.get("adaptive") and not order.get("fill_reported"):
-                fill_shares = max(0.0, float(order.get("shares", 0.0)) - float(order.get("remaining_shares", 0.0)))
+                fill_shares = max(0.0, float(order.get("filled_shares", 0.0)))
                 if fill_shares > 1e-9:
                     order["fill_reported"] = True
-                    fill_cost = fill_shares * float(order["price"])
                     fills.append({
                         "id": f"shadow-trade-{uuid.uuid4().hex}",
-                        "status": "CONFIRMED",
-                        "trader_side": "TAKER",
+                        "status": "CONFIRMED", "trader_side": "TAKER",
                         "taker_order_id": oid,
-                        "order_id": oid,
-                        "condition": order["condition"],
-                        "token": order["token"],
-                        "side": "BUY",
                         "maker_orders": [],
                         "price": order["price"],
                         "size": fill_shares,
-                        "filled_size": fill_shares,
                         "matched_amount": fill_shares,
+                        "filled_size": fill_shares,
                         "fee_rate_bps": "7",
-                        "transaction_hash": "",
-                        "shadow": True,
-                        "adaptive": True,
+                        "transaction_hash": "", "shadow": True, "adaptive": True,
                         "filled_shares": fill_shares,
-                        "notional": fill_cost,
-                        "filled_cost": fill_cost,
+                        "filled_cost": fill_shares * float(order["price"]),
+                        "order_final_status": "FILLED" if fill_shares + 1e-9 >= float(order.get("shares", 0.0)) else "CLOSED_OR_CANCELED",
                     })
                 continue
             if order.get("status") not in {"LIVE", "PARTIAL"}:
