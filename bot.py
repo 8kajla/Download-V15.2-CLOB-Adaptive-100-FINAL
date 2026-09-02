@@ -43,11 +43,15 @@ def prepare_fresh_data_dir():
 DATA = prepare_fresh_data_dir()
 
 PAPER = os.getenv("PAPER_TRADING", "true").lower() == "true"
-LIVE = os.getenv("LIVE_TRADING", "false").lower() == "true"
+# SHADOW_CLOB is a hard safety override for non-authenticated Railway
+# deployments.  If an old Railway service still has LIVE_TRADING=true,
+# shadow mode wins and the live CLOB client is never imported/constructed.
 SHADOW = os.getenv("SHADOW_CLOB", "false").lower() == "true"
-EXECUTION_MODE = LIVE or SHADOW
+LIVE = os.getenv("LIVE_TRADING", "false").lower() == "true"
 if SHADOW and LIVE:
-    raise SystemExit("SAFETY LOCK: SHADOW_CLOB and LIVE_TRADING cannot both be true")
+    log.warning("SHADOW_CLOB=true: forcing LIVE_TRADING=false; no authenticated CLOB client will be created")
+    LIVE = False
+EXECUTION_MODE = LIVE or SHADOW
 if LIVE and PAPER:
     raise SystemExit("SAFETY LOCK: set PAPER_TRADING=false when LIVE_TRADING=true")
 if not PAPER and not LIVE and not SHADOW:
