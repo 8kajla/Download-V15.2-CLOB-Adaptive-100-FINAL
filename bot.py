@@ -46,23 +46,9 @@ PAPER = os.getenv("PAPER_TRADING", "true").lower() == "true"
 # SHADOW_CLOB is a hard safety override for non-authenticated Railway
 # deployments.  If an old Railway service still has LIVE_TRADING=true,
 # shadow mode wins and the live CLOB client is never imported/constructed.
-# Railway is a shadow-only deployment target for this project. Its Docker image
-# intentionally installs requirements-shadow.txt, so LIVE_TRADING must never be
-# allowed to instantiate LiveCLOB there. An old/stale Railway variable must not
-# be able to defeat this safety boundary.
-is_railway = bool(
-    os.getenv("RAILWAY_ENVIRONMENT")
-    or os.getenv("RAILWAY_PROJECT_ID")
-    or os.getenv("RAILWAY_SERVICE_ID")
-)
-SHADOW = os.getenv("SHADOW_CLOB", "true" if is_railway else "false").lower() == "true"
+SHADOW = os.getenv("SHADOW_CLOB", "false").lower() == "true"
 LIVE = os.getenv("LIVE_TRADING", "false").lower() == "true"
-if is_railway:
-    if LIVE:
-        log.warning("RAILWAY DETECTED: forcing LIVE_TRADING=false; Railway runtime is shadow-only")
-    LIVE = False
-    SHADOW = True
-elif SHADOW and LIVE:
+if SHADOW and LIVE:
     log.warning("SHADOW_CLOB=true: forcing LIVE_TRADING=false; no authenticated CLOB client will be created")
     LIVE = False
 EXECUTION_MODE = LIVE or SHADOW
@@ -514,9 +500,15 @@ def main():
                     )
                     ob_last[market["condition"]] = now
 
-                # Discovery is fail-closed: missing acceptingOrders must never
-                # be interpreted as permission to trade.
-                if market.get("accepting_orders") is not True:
+                # Live mode is fail-closed on acceptingOrders because the live
+                # exchange must explicitly advertise that it accepts orders.
+                # Shadow mode never submits an order, so applying that gate would
+                # incorrectly suppress public-LOB execution simulation.
+                if LIVE and market.get("accepting_orders") is not True:
+                    p(
+                        f"LIVE MARKET SKIP | asset={market.get('asset')} "
+                        f"| reason=ACCEPTING_ORDERS_FALSE"
+                    )
                     continue
 
                 # The reference trader's intertrade cadence is global across
