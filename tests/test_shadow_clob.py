@@ -99,21 +99,47 @@ def test_shadow_mode_cannot_construct_live_client(monkeypatch):
     assert 'if LIVE:\n    from live_clob import LiveCLOB' in text
 
 
-def test_shadow_adaptive_fill_is_consumed_by_live_ledger(tmp_path):
+def test_shadow_adaptive_no_ask_is_nonfatal(tmp_path):
+    class S:
+        def __init__(self): self.headers = {}
+        def get(self, url, params=None, timeout=None):
+            class R:
+                def raise_for_status(self): pass
+                def json(self): return {"bids":[{"price":"0.20","size":"10"}],"asks":[],"min_order_size":"5","tick_size":"0.01"}
+            return R()
+    import pytest
+    c=ShadowCLOB(tmp_path/'s.json'); c.session=S()
+    with pytest.raises(ValueError, match='no current ask'):
+        c.adaptive_buy('t', .25, 5, 'c')
+
+
+def test_shadow_fak_remainder_not_resting(tmp_path):
+    class S:
+        def __init__(self): self.headers = {}
+        def get(self, url, params=None, timeout=None):
+            class R:
+                def raise_for_status(self): pass
+                def json(self): return {"bids":[{"price":"0.20","size":"10"}],"asks":[{"price":"0.21","size":"3"}],"min_order_size":"5","tick_size":"0.01"}
+            return R()
+    c=ShadowCLOB(tmp_path/'s.json'); c.session=S()
+    r=c.adaptive_buy('t', .22, 5, 'c')
+    assert r['status']=='matched'
+    assert c.get_open_orders()==[]
+    fills=c.get_trades(); assert fills and fills[0]['size']==3
+    assert fills[0]['order_final_status']=='CLOSED_OR_CANCELED'
+
+
+def test_shadow_partial_fill_releases_ledger_reservation(tmp_path):
     from live_ledger import LiveLedger
-
-    shadow = ShadowCLOB(tmp_path / "shadow.json")
-    shadow.session = FakeSession()
-    response = shadow.adaptive_buy("t1", 0.82, 5.0, "c1")
-    oid = response["orderID"]
-
-    ledger = LiveLedger(tmp_path / "ledger.json", 100.0)
-    ledger.record_order(oid, "c1", "t1", "Down", 0.82, 4.10, "m1", meta={"execution_mode": "CLOB_ADAPTIVE_FAK"})
-    fills = ledger.sync_trades(shadow.get_trades())
-
-    assert len(fills) == 1
-    assert fills[0]["order_id"] == oid
-    assert fills[0]["shares"] == pytest.approx(5.0)
-    assert fills[0]["notional"] == pytest.approx(4.10)
-    assert ledger.cash < 100.0
-    assert ledger.total_open_cost() == pytest.approx(4.10)
+    ledger = LiveLedger(tmp_path/'state.json', 100.0)
+    oid='o1'
+    ledger.record_order(oid, 'c', 't', 'Up', 0.21, 1.05, 'BTC', meta={})
+    fill={
+        'id':'f1','status':'CONFIRMED','trader_side':'TAKER','taker_order_id':oid,
+        'price':0.21,'size':3,'fee_rate_bps':'7','order_final_status':'CLOSED_OR_CANCELED',
+        'shadow':True,
+    }
+    out=ledger.sync_trades([fill])
+    assert len(out)==1
+    assert ledger.total_reserved()==0.0
+    assert ledger.orders[oid]['status']=='CLOSED_OR_CANCELED'
