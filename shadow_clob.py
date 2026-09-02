@@ -229,16 +229,28 @@ class ShadowCLOB:
                 fill_shares = max(0.0, float(order.get("shares", 0.0)) - float(order.get("remaining_shares", 0.0)))
                 if fill_shares > 1e-9:
                     order["fill_reported"] = True
+                    fill_cost = fill_shares * float(order["price"])
                     fills.append({
                         "id": f"shadow-trade-{uuid.uuid4().hex}",
-                        "status": "CONFIRMED", "trader_side": "TAKER",
+                        "status": "CONFIRMED",
+                        "trader_side": "TAKER",
                         "taker_order_id": oid,
+                        "order_id": oid,
+                        "condition": order["condition"],
+                        "token": order["token"],
+                        "side": "BUY",
                         "maker_orders": [],
                         "price": order["price"],
+                        "size": fill_shares,
+                        "filled_size": fill_shares,
+                        "matched_amount": fill_shares,
                         "fee_rate_bps": "7",
-                        "transaction_hash": "", "shadow": True, "adaptive": True,
+                        "transaction_hash": "",
+                        "shadow": True,
+                        "adaptive": True,
                         "filled_shares": fill_shares,
-                        "filled_cost": fill_shares * float(order["price"]),
+                        "notional": fill_cost,
+                        "filled_cost": fill_cost,
                     })
                 continue
             if order.get("status") not in {"LIVE", "PARTIAL"}:
