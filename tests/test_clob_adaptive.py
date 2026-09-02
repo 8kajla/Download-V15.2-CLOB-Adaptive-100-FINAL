@@ -83,3 +83,8 @@ def test_live_clob_adaptive_buy_uses_fak_and_not_post_only(monkeypatch):
     assert calls[0]['order_type']=='FAK'
     assert calls[0]['post_only'] is False
     assert calls[0]['order_args'].size == pytest.approx(5)
+
+
+def test_missing_ask_is_safe_no_plan():
+    p = CLOBAdaptivePlanner()
+    assert p.plan([item(.10, .03, 'CHEAP')], current_ask=None, min_shares=5, tick_size=.01, now=1) is None
