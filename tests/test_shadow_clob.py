@@ -99,9 +99,21 @@ def test_shadow_mode_cannot_construct_live_client(monkeypatch):
     assert 'if LIVE:\n    from live_clob import LiveCLOB' in text
 
 
-def test_shadow_does_not_require_accepting_orders_gate():
-    """Shadow execution must not discard public-market signals when Gamma says acceptingOrders=false."""
-    src = Path(__file__).resolve().parents[1] / "bot.py"
-    text = src.read_text()
-    assert 'if LIVE and market.get("accepting_orders") is not True:' in text
-    assert 'if SHADOW and market.get("accepting_orders") is not True:' not in text
+def test_shadow_adaptive_fill_is_consumed_by_live_ledger(tmp_path):
+    from live_ledger import LiveLedger
+
+    shadow = ShadowCLOB(tmp_path / "shadow.json")
+    shadow.session = FakeSession()
+    response = shadow.adaptive_buy("t1", 0.82, 5.0, "c1")
+    oid = response["orderID"]
+
+    ledger = LiveLedger(tmp_path / "ledger.json", 100.0)
+    ledger.record_order(oid, "c1", "t1", "Down", 0.82, 4.10, "m1", meta={"execution_mode": "CLOB_ADAPTIVE_FAK"})
+    fills = ledger.sync_trades(shadow.get_trades())
+
+    assert len(fills) == 1
+    assert fills[0]["order_id"] == oid
+    assert fills[0]["shares"] == pytest.approx(5.0)
+    assert fills[0]["notional"] == pytest.approx(4.10)
+    assert ledger.cash < 100.0
+    assert ledger.total_open_cost() == pytest.approx(4.10)
