@@ -500,15 +500,9 @@ def main():
                     )
                     ob_last[market["condition"]] = now
 
-                # Live mode is fail-closed on acceptingOrders because the live
-                # exchange must explicitly advertise that it accepts orders.
-                # Shadow mode never submits an order, so applying that gate would
-                # incorrectly suppress public-LOB execution simulation.
-                if LIVE and market.get("accepting_orders") is not True:
-                    p(
-                        f"LIVE MARKET SKIP | asset={market.get('asset')} "
-                        f"| reason=ACCEPTING_ORDERS_FALSE"
-                    )
+                # Discovery is fail-closed: missing acceptingOrders must never
+                # be interpreted as permission to trade.
+                if market.get("accepting_orders") is not True:
                     continue
 
                 # The reference trader's intertrade cadence is global across
@@ -728,6 +722,12 @@ def main():
                                        if str(x.get("condition")) == str(market["condition"])
                                        and str(x.get("token")) == str(token)
                                        and str(x.get("side")) == str(signal.side)]
+                        if current_ask is None:
+                            p(f"CLOB ADAPTIVE WAIT | asset={market['asset']} | side={signal.side} "
+                              f"| signal=${notion:.4f} | bid=${signal.price:.4f} | ask=None "
+                              f"| reason=NO_CURRENT_ASK")
+                            continue
+
                         plan = adaptive_planner.plan(
                             group_items, current_ask=current_ask, min_shares=min_shares,
                             tick_size=tick, now=now
@@ -791,7 +791,18 @@ def main():
                           f"| shares={plan.order_shares:.6f} | signals={len(plan.items)} | topup=${plan.topup:.4f}")
                     except Exception as exc:
                         msg = str(exc).lower()
-                        if any(x in msg for x in ("below market minimum", "market minimum", "no acceptable ask")):
+                        transient = (
+                            "below market minimum" in msg
+                            or "market minimum" in msg
+                            or "no acceptable ask" in msg
+                            or "no current ask" in msg
+                            or "missing ask" in msg
+                            or "empty ask" in msg
+                        )
+                        if transient or SHADOW:
+                            # Shadow mode consumes public, eventually-consistent market data.
+                            # A missing/temporarily invalid ask is a normal no-trade condition,
+                            # never a reason to persist a risk halt and kill the simulator.
                             p(f"CLOB ADAPTIVE WAIT | asset={market['asset']} | reason={exc}")
                             continue
                         risk.halt(f"ADAPTIVE_ORDER_ERROR:{type(exc).__name__}")
@@ -881,12 +892,18 @@ def main():
             consecutive_errors += 1
             p(f"LOOP ERROR | {type(exc).__name__}: {exc}")
             traceback.print_exc()
-            if EXECUTION_MODE:
+            if LIVE:
                 try: risk.halt(f"LOOP_ERROR:{type(exc).__name__}")
                 except Exception: pass
                 try: live.cancel_all()
                 except Exception: pass
                 raise RuntimeError("LIVE SAFETY STOP: unexpected live-path exception") from exc
+            # Shadow mode must survive transient public-data/API faults.
+            # Requiring a fresh container for every missing quote defeats the point
+            # of the shadow simulator and creates a false safety-stop loop.
+            if SHADOW and consecutive_errors < 10:
+                time.sleep(1)
+                continue
             if consecutive_errors >= 10:
                 raise
             time.sleep(2)
