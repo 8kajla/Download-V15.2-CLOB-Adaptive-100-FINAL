@@ -308,7 +308,11 @@ class LiveLedger:
             self.pending_trades.pop(tid, None)
             self.seen_trades.add(tid)
             order["last_trade_status"] = status
-            order["status"] = "FILLED" if remaining_reserved <= 1e-8 else "PARTIAL"
+            final_status = trade.get("order_final_status")
+            if final_status in {"FILLED", "CLOSED_OR_CANCELED", "CANCELED", "CANCELLED", "FAILED"}:
+                order["status"] = "FILLED" if final_status == "FILLED" else "CLOSED_OR_CANCELED"
+            else:
+                order["status"] = "FILLED" if remaining_reserved <= 1e-8 else "PARTIAL"
             self.save()
         return new_fills
 
